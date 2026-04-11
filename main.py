@@ -18,9 +18,10 @@ def fetch_data():
         if df is not None and not df.empty:
             for _, row in df.iterrows():
                 p_list = row['participants'].split(", ")
+                # הוסר rate=row['rate_at_time'] כי אנחנו מתעניינים רק ביין
                 expenses.append(Expense(
                     row['description'], row['amount_jpy'], row['payer'],
-                    p_list, date=row['date'], rate=row['rate_at_time']
+                    p_list, date=row['date']
                 ))
         return expenses
     except Exception as e:
@@ -38,7 +39,8 @@ def calculate_settlements(balances):
         debtor, creditor = debtors[0], creditors[0]
         transfer = min(debtor[1], creditor[1])
         if transfer > 0.01:
-            settlements.append(f"**{debtor[0]}** מעביר ל-**{creditor[0]}**: {transfer:,.2f} ₪")
+            # שינינו ל-¥ וללא נקודה עשרונית
+            settlements.append(f"**{debtor[0]}** מעביר ל-**{creditor[0]}**: {transfer:,.0f} ¥")
 
         debtor[1] -= transfer
         creditor[1] -= transfer
@@ -54,10 +56,10 @@ def calculate_settlements(balances):
 def show_history_dialog():
     if st.session_state.all_expenses:
         history_df = pd.DataFrame([
-            {"#": i + 1, "תיאור": e.description, "₪": f"{e.amount_ils:,.2f}", "שילם": e.payer, "תאריך": e.date}
+            # שינינו את התצוגה ל-amount_jpy עם סמל היין
+            {"#": i + 1, "תיאור": e.description, "¥": f"{e.amount_jpy:,.0f}", "שילם": e.payer, "תאריך": e.date}
             for i, e in enumerate(st.session_state.all_expenses)
         ])
-        # הצגת הטבלה מהסוף להתחלה (הכי חדש למעלה) עם רוחב מותאם ל-2026
         st.dataframe(history_df.iloc[::-1], width='stretch', hide_index=True)
     else:
         st.info("עדיין אין הוצאות רשומות בטיול.")
@@ -67,7 +69,6 @@ def show_history_dialog():
 if 'all_expenses' not in st.session_state:
     st.session_state.all_expenses = fetch_data()
 
-# עדכון השמות כאן: אביב, לידור ועומרי
 participants = ["אביב", "לידור", "עומרי"]
 trip = TripGroup(participants, expenses_list=st.session_state.all_expenses)
 
@@ -90,13 +91,12 @@ with st.expander("➕ הוסף הוצאה חדשה"):
                 new_exp = Expense(desc, amount, payer, who_participated)
                 st.session_state.all_expenses.append(new_exp)
 
-                # שמירה לגוגל
+                # שמירה לגוגל ללא עמודות השקלים
                 df_existing = conn.read(ttl=0)
                 new_row = pd.DataFrame([{
                     "date": new_exp.date, "description": new_exp.description,
                     "amount_jpy": new_exp.amount_jpy, "payer": new_exp.payer,
-                    "participants": ", ".join(new_exp.participants),
-                    "rate_at_time": new_exp.rate_at_time, "amount_ils": new_exp.amount_ils
+                    "participants": ", ".join(new_exp.participants)
                 }])
                 updated_df = pd.concat([df_existing, new_row], ignore_index=True)
                 conn.update(data=updated_df)
@@ -108,7 +108,7 @@ with st.expander("➕ הוסף הוצאה חדשה"):
 # --- ממשק עריכת הוצאה ---
 with st.expander("✏️ עריכת הוצאה קיימת"):
     if st.session_state.all_expenses:
-        exp_options = [f"{i + 1}: {e.description} ({e.amount_jpy}¥)" for i, e in
+        exp_options = [f"{i + 1}: {e.description} ({e.amount_jpy:,.0f}¥)" for i, e in
                        enumerate(st.session_state.all_expenses)]
         selected_edit = st.selectbox("בחר הוצאה לעריכה:", exp_options)
         edit_idx = int(selected_edit.split(":")[0]) - 1
@@ -125,11 +125,13 @@ with st.expander("✏️ עריכת הוצאה קיימת"):
                 st.session_state.all_expenses[edit_idx] = updated_exp
 
                 df_to_edit = conn.read(ttl=0)
-                df_to_edit.iloc[edit_idx] = [
-                    updated_exp.date, updated_exp.description, updated_exp.amount_jpy,
-                    updated_exp.payer, ", ".join(updated_exp.participants),
-                    updated_exp.rate_at_time, updated_exp.amount_ils
-                ]
+                # עדכון ספציפי של תאים כדי למנוע קריסה אם העמודות בגוגל שיטס שונות
+                df_to_edit.at[edit_idx, "date"] = updated_exp.date
+                df_to_edit.at[edit_idx, "description"] = updated_exp.description
+                df_to_edit.at[edit_idx, "amount_jpy"] = updated_exp.amount_jpy
+                df_to_edit.at[edit_idx, "payer"] = updated_exp.payer
+                df_to_edit.at[edit_idx, "participants"] = ", ".join(updated_exp.participants)
+                
                 conn.update(data=df_to_edit)
                 st.success("המידע עודכן!")
                 st.rerun()
@@ -159,7 +161,8 @@ with col1:
     st.subheader("💰 מאזן כללי")
     for name, bal in balances.items():
         color = "green" if bal >= 0 else "red"
-        st.markdown(f"**{name}**: :{color}[{bal:,.2f} ₪]")
+        # שינוי לתצוגת יין ללא נקודה עשרונית
+        st.markdown(f"**{name}**: :{color}[{bal:,.0f} ¥]")
 
 with col2:
     st.subheader("🤝 סגירת חובות")
