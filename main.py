@@ -4,7 +4,7 @@ from logic import Expense, TripGroup
 import pandas as pd
 
 # 1. הגדרת דף - תמיד הפקודה הראשונה!
-st.set_page_config(page_title="Japan Trip Expenses", layout="centered", page_icon="🇯🇵")
+st.set_page_config(page_title="Korea Trip Expenses", layout="centered", page_icon="🇰🇷")
 
 # 2. חיבור ל-Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -18,9 +18,8 @@ def fetch_data():
         if df is not None and not df.empty:
             for _, row in df.iterrows():
                 p_list = row['participants'].split(", ")
-                # הוסר rate=row['rate_at_time'] כי אנחנו מתעניינים רק ביין
                 expenses.append(Expense(
-                    row['description'], row['amount_jpy'], row['payer'],
+                    row['description'], row['amount_krw'], row['payer'],
                     p_list, date=row['date']
                 ))
         return expenses
@@ -39,8 +38,7 @@ def calculate_settlements(balances):
         debtor, creditor = debtors[0], creditors[0]
         transfer = min(debtor[1], creditor[1])
         if transfer > 0.01:
-            # שינינו ל-¥ וללא נקודה עשרונית
-            settlements.append(f"**{debtor[0]}** מעביר ל-**{creditor[0]}**: {transfer:,.0f} ¥")
+            settlements.append(f"**{debtor[0]}** מעביר ל-**{creditor[0]}**: {transfer:,.0f} ₩")
 
         debtor[1] -= transfer
         creditor[1] -= transfer
@@ -56,8 +54,7 @@ def calculate_settlements(balances):
 def show_history_dialog():
     if st.session_state.all_expenses:
         history_df = pd.DataFrame([
-            # שינינו את התצוגה ל-amount_jpy עם סמל היין
-            {"#": i + 1, "תיאור": e.description, "¥": f"{e.amount_jpy:,.0f}", "שילם": e.payer, "תאריך": e.date}
+            {"#": i + 1, "תיאור": e.description, "₩": f"{e.amount_krw:,.0f}", "שילם": e.payer, "תאריך": e.date}
             for i, e in enumerate(st.session_state.all_expenses)
         ])
         st.dataframe(history_df.iloc[::-1], width='stretch', hide_index=True)
@@ -69,10 +66,10 @@ def show_history_dialog():
 if 'all_expenses' not in st.session_state:
     st.session_state.all_expenses = fetch_data()
 
-participants = ["אביב", "לידור", "עומרי"]
+participants = ["אביב", "לידור"]
 trip = TripGroup(participants, expenses_list=st.session_state.all_expenses)
 
-st.title("🇯🇵 Splitwise יפן")
+st.title("🇰🇷 Splitwise קוריאה")
 
 # כפתור שפותח את חלון ההיסטוריה
 if st.button("📜 לצפייה בהיסטוריית הוצאות"):
@@ -82,7 +79,7 @@ if st.button("📜 לצפייה בהיסטוריית הוצאות"):
 with st.expander("➕ הוסף הוצאה חדשה"):
     with st.form("new_expense", clear_on_submit=True):
         desc = st.text_input("תיאור ההוצאה")
-        amount = st.number_input("סכום ביאנים (JPY)", min_value=0, step=100)
+        amount = st.number_input("סכום בוון (KRW)", min_value=0, step=1000)
         payer = st.selectbox("מי שילם?", trip.members)
         who_participated = st.multiselect("עבור מי?", trip.members, default=trip.members)
 
@@ -91,11 +88,10 @@ with st.expander("➕ הוסף הוצאה חדשה"):
                 new_exp = Expense(desc, amount, payer, who_participated)
                 st.session_state.all_expenses.append(new_exp)
 
-                # שמירה לגוגל ללא עמודות השקלים
                 df_existing = conn.read(ttl=0)
                 new_row = pd.DataFrame([{
                     "date": new_exp.date, "description": new_exp.description,
-                    "amount_jpy": new_exp.amount_jpy, "payer": new_exp.payer,
+                    "amount_krw": new_exp.amount_krw, "payer": new_exp.payer,
                     "participants": ", ".join(new_exp.participants)
                 }])
                 updated_df = pd.concat([df_existing, new_row], ignore_index=True)
@@ -108,7 +104,7 @@ with st.expander("➕ הוסף הוצאה חדשה"):
 # --- ממשק עריכת הוצאה ---
 with st.expander("✏️ עריכת הוצאה קיימת"):
     if st.session_state.all_expenses:
-        exp_options = [f"{i + 1}: {e.description} ({e.amount_jpy:,.0f}¥)" for i, e in
+        exp_options = [f"{i + 1}: {e.description} ({e.amount_krw:,.0f}₩)" for i, e in
                        enumerate(st.session_state.all_expenses)]
         selected_edit = st.selectbox("בחר הוצאה לעריכה:", exp_options)
         edit_idx = int(selected_edit.split(":")[0]) - 1
@@ -116,7 +112,7 @@ with st.expander("✏️ עריכת הוצאה קיימת"):
 
         with st.form("edit_form"):
             new_desc = st.text_input("תיאור חדש", value=current_exp.description)
-            new_amount = st.number_input("סכום חדש (JPY)", value=int(current_exp.amount_jpy), min_value=1)
+            new_amount = st.number_input("סכום חדש (KRW)", value=int(current_exp.amount_krw), min_value=1)
             new_payer = st.selectbox("מי שילם?", trip.members, index=trip.members.index(current_exp.payer))
             new_who = st.multiselect("עבור מי?", trip.members, default=current_exp.participants)
 
@@ -125,10 +121,9 @@ with st.expander("✏️ עריכת הוצאה קיימת"):
                 st.session_state.all_expenses[edit_idx] = updated_exp
 
                 df_to_edit = conn.read(ttl=0)
-                # עדכון ספציפי של תאים כדי למנוע קריסה אם העמודות בגוגל שיטס שונות
                 df_to_edit.at[edit_idx, "date"] = updated_exp.date
                 df_to_edit.at[edit_idx, "description"] = updated_exp.description
-                df_to_edit.at[edit_idx, "amount_jpy"] = updated_exp.amount_jpy
+                df_to_edit.at[edit_idx, "amount_krw"] = updated_exp.amount_krw
                 df_to_edit.at[edit_idx, "payer"] = updated_exp.payer
                 df_to_edit.at[edit_idx, "participants"] = ", ".join(updated_exp.participants)
                 
@@ -161,8 +156,7 @@ with col1:
     st.subheader("💰 מאזן כללי")
     for name, bal in balances.items():
         color = "green" if bal >= 0 else "red"
-        # שינוי לתצוגת יין ללא נקודה עשרונית
-        st.markdown(f"**{name}**: :{color}[{bal:,.0f} ¥]")
+        st.markdown(f"**{name}**: :{color}[{bal:,.0f} ₩]")
 
 with col2:
     st.subheader("🤝 סגירת חובות")
